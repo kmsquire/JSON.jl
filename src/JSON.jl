@@ -6,7 +6,49 @@ include("Parser.jl")
 
 import .Parser.parse
 
-function print_escaped(io, s::String)
+type State
+    io::IO
+    indentstep::Int
+    indentlen::Int
+    prefix::String
+    sufix::String
+    otype::Array{Bool, 1}
+    function State(io::IO, indentstep::Int)
+        sufix = indentstep > 0 ? "\n" : ""
+        new(io, indentstep, 0, "", sufix, Bool[])
+    end
+end
+
+function set_state(state::State, operate::Int)
+    state.indentlen += state.indentstep * operate
+    state.prefix = " "^state.indentlen
+end
+
+function start_object(state::State, is_dict::Bool)
+    if state.indentstep > 0
+        was_dict = length(state.otype) == 0 ? false : last(state.otype)
+        if was_dict
+            Base.print(state.io, state.sufix, state.prefix)
+        end
+        push!(state.otype, is_dict)
+    end
+    bracket = is_dict ? "{": "["
+    Base.print(state.io, bracket, state.sufix)
+    if state.indentstep > 0
+        set_state(state, 1)
+    end
+end
+
+function end_object(state::State, is_dict::Bool)
+    if state.indentstep > 0
+        set_state(state, -1)
+        pop!(state.otype)
+    end
+    bracket = is_dict ? "}": "]"
+    Base.print(state.io, state.sufix, state.prefix, bracket)
+end
+
+function print_escaped(io::IO, s::String)
     i = start(s)
     while !done(s,i)
         c, j = next(s,i)
@@ -22,46 +64,48 @@ function print_escaped(io, s::String)
     end
 end
 
-function print(io::IO, s::String)
-    Base.print(io, '"')
-    JSON.print_escaped(io, s)
-    Base.print(io, '"')
+function print(state::State, s::String)
+    Base.print(state.io, '"')
+    JSON.print_escaped(state.io, s)
+    Base.print(state.io, '"')
 end
 
-function print(io::IO, s::Union(Integer, FloatingPoint))
+function print(state::State, s::Union(Integer, FloatingPoint))
     if isnan(s) || isinf(s)
-        Base.print(io, "null")
+        Base.print(state.io, "null")
     else
-        Base.print(io, s)
+        Base.print(state.io, s)
     end
 end
 
-function print(io::IO, n::Nothing)
-        Base.print(io, "null")
-    end
+function print(state::State, n::Nothing)
+    Base.print(state.io, "null")
+end
 
-function print(io::IO, a::Associative)
-    Base.print(io, "{")
+function print(state::State, a::Associative)
+    start_object(state, true)
     first = true
     for (key, value) in a
-        first ? (first = false) : Base.print(io, ",")
-        JSON.print(io, string(key))
-        Base.print(io, ':')
-        JSON.print(io, value)
+        first ? (first = false) : Base.print(state.io, ",", state.sufix)
+        Base.print(state.io, state.prefix)
+        JSON.print(state, string(key))
+        Base.print(state.io, ":")
+        JSON.print(state, value)
     end
-    Base.print(io, "}")
+    end_object(state, true)
 end
 
-function print(io::IO, a::Union(AbstractVector,Tuple))
-    Base.print(io, "[")
+function print(state::State, a::Union(AbstractVector,Tuple))
+    start_object(state, false)
     if length(a) > 0
+        Base.print(state.io, state.prefix)
         for x in a[1:end-1]
-            JSON.print(io, x)
-            Base.print(io, ",")
+            JSON.print(state, x)
+            Base.print(state.io, ",", state.sufix, state.prefix)
         end
 
         try
-            JSON.print(io, a[end])
+            JSON.print(state, a[end])
         catch
             # Potentially we got here by accessing
             # something through a 0 dimensional
@@ -69,58 +113,64 @@ function print(io::IO, a::Union(AbstractVector,Tuple))
             # behavior is to not print and move on
         end
     end
-    Base.print(io, "]")
+    end_object(state, false)
 end
 
-function print(io::IO, a)
-    Base.print(io, "{")
-
+function print(state::State, a)
+    start_object(state, true)
     range = typeof(a).names
     if length(range) > 0
-        Base.print(io, "\"", range[1], "\":")
-        JSON.print(io, a.(range[1]))
+        Base.print(state.io, state.prefix, "\"", range[1], "\":")
+        JSON.print(state, a.(range[1]))
 
         for name in range[2:end]
-            Base.print(io, ",")
-            Base.print(io, "\"", name, "\":")
-            JSON.print(io, a.(name))
+            Base.print(state.io, ",", state.sufix)
+            Base.print(state.io, state.prefix, "\"", name, "\":")
+            JSON.print(state, a.(name))
         end
     end
-    Base.print(io, "}")
+    end_object(state, true)
 end
 
-function print(io::IO, f::Function)
-    Base.print(io, "\"function at ", f.fptr, "\"")
+function print(state::State, f::Function)
+    Base.print(state.io, "\"function at ", f.fptr, "\"")
 end
 
-function print(io::IO, d::DataType)
-    Base.print(io, d)
+function print(state::State, d::DataType)
+    Base.print(state.io, d)
 end
 
 # Note: Arrays are printed in COLUMN MAJOR format.
 # i.e. json([1 2 3; 4 5 6]) == "[[1,4],[2,5],[3,6]]"
-function print{T, N}(io::IO, a::AbstractArray{T, N})
-    Base.print(io, "[")
-
+function print{T, N}(state::State, a::AbstractArray{T, N})
+    start_object(state, false)
     lengthN = size(a, N)
     if lengthN >= 0
         newdims = ntuple(N - 1, i -> 1:size(a, i))
-        print(io, slice(a, newdims..., 1))
+        Base.print(state.io, state.prefix)
+        JSON.print(state, slice(a, newdims..., 1))
 
         for j in 2:lengthN
-            Base.print(io, ",")
+            Base.print(state.io, ",", state.sufix, state.prefix)
 
             newdims = ntuple(N - 1, i -> 1:size(a, i))
-            print(io, slice(a, newdims..., j))
+            JSON.print(state, slice(a, newdims..., j))
         end
     end
-
-    Base.print(io, "]")
+    end_object(state, false)
 end
 
-print(a) = print(STDOUT, a)
+function print(io::IO, a, indent)
+    print(State(io, indent), a)
+    println()
+end
 
-json(a) = sprint(JSON.print, a)
+function print(a, indent=0)
+    JSON.print(State(STDOUT, indent), a)
+    println()
+end
+
+json(a, indent=0) = sprint(JSON.print, a, indent)
 
 function determine_bracket_type(io::IO)
     open_bracket = close_bracket = nothing
