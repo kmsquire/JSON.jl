@@ -165,7 +165,7 @@ end
 function print(io::IO, a, indent)
     print(State(io, indent), a)
     if indent > 0
-        println()
+        Base.print(io, "\n")
     end
 end
 
