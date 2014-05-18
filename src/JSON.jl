@@ -12,11 +12,15 @@ type State
     indentlen::Int
     prefix::String
     sufix::String
+    dsep::String
     otype::Array{Bool, 1}
-    function State(io::IO, indentstep::Int)
-        sufix = indentstep > 0 ? "\n" : ""
-        new(io, indentstep, 0, "", sufix, Bool[])
-    end
+    State(io::IO, indentstep::Int) = new(io, 
+                                            indentstep, 
+                                            0, 
+                                            "", 
+                                            indentstep > 0 ? "\n" : "", 
+                                            indentstep > 0 ? ": " : ":",
+                                            Bool[])
 end
 
 function set_state(state::State, operate::Int)
@@ -31,11 +35,10 @@ function start_object(state::State, is_dict::Bool)
             Base.print(state.io, state.sufix, state.prefix)
         end
         push!(state.otype, is_dict)
-    end
-    bracket = is_dict ? "{": "["
-    Base.print(state.io, bracket, state.sufix)
-    if state.indentstep > 0
+        Base.print(state.io, is_dict ? "{": "[", state.sufix)
         set_state(state, 1)
+    else
+        Base.print(state.io, is_dict ? "{": "[", state.sufix)
     end
 end
 
@@ -44,8 +47,7 @@ function end_object(state::State, is_dict::Bool)
         set_state(state, -1)
         pop!(state.otype)
     end
-    bracket = is_dict ? "}": "]"
-    Base.print(state.io, state.sufix, state.prefix, bracket)
+    Base.print(state.io, state.sufix, state.prefix, is_dict ? "}": "]")
 end
 
 function print_escaped(io::IO, s::String)
@@ -89,7 +91,7 @@ function print(state::State, a::Associative)
         first ? (first = false) : Base.print(state.io, ",", state.sufix)
         Base.print(state.io, state.prefix)
         JSON.print(state, string(key))
-        Base.print(state.io, ":")
+        Base.print(state.io, state.dsep)
         JSON.print(state, value)
     end
     end_object(state, true)
@@ -120,12 +122,12 @@ function print(state::State, a)
     start_object(state, true)
     range = typeof(a).names
     if length(range) > 0
-        Base.print(state.io, state.prefix, "\"", range[1], "\":")
+        Base.print(state.io, state.prefix, "\"", range[1], "\"", state.dsep)
         JSON.print(state, a.(range[1]))
 
         for name in range[2:end]
             Base.print(state.io, ",", state.sufix)
-            Base.print(state.io, state.prefix, "\"", name, "\":")
+            Base.print(state.io, state.prefix, "\"", name, "\"", state.dsep)
             JSON.print(state, a.(name))
         end
     end
@@ -162,12 +164,16 @@ end
 
 function print(io::IO, a, indent)
     print(State(io, indent), a)
-    println()
+    if indent > 0
+        println()
+    end
 end
 
 function print(a, indent=0)
     JSON.print(State(STDOUT, indent), a)
-    println()
+    if indent > 0
+        println()
+    end
 end
 
 json(a, indent=0) = sprint(JSON.print, a, indent)
