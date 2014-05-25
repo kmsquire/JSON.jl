@@ -9,17 +9,17 @@ import .Parser.parse
 type State
     io::IO
     indentstep::Int
+    doindent::Bool
     indentlen::Int
     prefix::String
     sufix::String
-    dsep::String
     otype::Array{Bool, 1}
     State(io::IO, indentstep::Int) = new(io, 
                                          indentstep, 
+                                         indentstep > 0,
                                          0, 
                                          "", 
-                                         indentstep > 0 ? "\n" : "", 
-                                         indentstep > 0 ? ": " : ":",
+                                         indentstep > 0 ? "\n" : "",
                                          Bool[])
 end
 
@@ -29,7 +29,7 @@ function set_state(state::State, operate::Int)
 end
 
 function start_object(state::State, is_dict::Bool)
-    if state.indentstep > 0
+    if state.doindent
         was_dict = length(state.otype) == 0 ? false : last(state.otype)
         if was_dict
             Base.print(state.io, state.sufix, state.prefix)
@@ -43,7 +43,7 @@ function start_object(state::State, is_dict::Bool)
 end
 
 function end_object(state::State, is_dict::Bool)
-    if state.indentstep > 0
+    if state.doindent
         set_state(state, -1)
         pop!(state.otype)
         Base.print(state.io, state.sufix, state.prefix, is_dict ? "}": "]")
@@ -93,7 +93,7 @@ function _print(state::State, a::Associative)
         first ? (first = false) : Base.print(state.io, ",", state.sufix)
         Base.print(state.io, state.prefix)
         JSON._print(state, string(key))
-        Base.print(state.io, state.dsep)
+        Base.print(state.io, state.doindent ? ": " : ":")
         JSON._print(state, value)
     end
     end_object(state, true)
@@ -105,7 +105,8 @@ function _print(state::State, a::Union(AbstractVector,Tuple))
         Base.print(state.io, state.prefix)
         for x in a[1:end-1]
             JSON._print(state, x)
-            Base.print(state.io, ",", state.sufix, state.prefix)
+            state.doindent ? Base.print(state.io, ",", state.sufix, state.prefix) : 
+                             Base.print(state.io, ",")
         end
 
         try
@@ -126,12 +127,12 @@ function _print(state::State, a)
     start_object(state, true)
     range = typeof(a).names
     if length(range) > 0
-        Base.print(state.io, state.prefix, "\"", range[1], "\"", state.dsep)
+        Base.print(state.io, state.prefix, "\"", range[1], state.doindent ? "\": " : "\":")
         JSON._print(state, a.(range[1]))
 
         for name in range[2:end]
-            Base.print(state.io, ",", state.sufix)
-            Base.print(state.io, state.prefix, "\"", name, "\"", state.dsep)
+            state.doindent ? Base.print(state.io, ",", state.sufix, state.prefix, "\"", name, "\": ") :
+                             Base.print(state.io, ",\"", name, "\":")
             JSON._print(state, a.(name))
         end
     end
@@ -149,21 +150,24 @@ end
 # Note: Arrays are printed in COLUMN MAJOR format.
 # i.e. json([1 2 3; 4 5 6]) == "[[1,4],[2,5],[3,6]]"
 function _print{T, N}(state::State, a::AbstractArray{T, N})
-    start_object(state, false)
     lengthN = size(a, N)
     if lengthN >= 0
+        start_object(state, false)
         newdims = ntuple(N - 1, i -> 1:size(a, i))
         Base.print(state.io, state.prefix)
         JSON._print(state, slice(a, newdims..., 1))
 
         for j in 2:lengthN
-            Base.print(state.io, ",", state.sufix, state.prefix)
+            state.doindent ? Base.print(state.io, ",", state.sufix, state.prefix) :
+                             Base.print(state.io, ",")
 
             newdims = ntuple(N - 1, i -> 1:size(a, i))
             JSON._print(state, slice(a, newdims..., j))
         end
+        end_object(state, false)
+    else
+        Base.print(state.io, "[]")
     end
-    end_object(state, false)
 end
 
 function print(io::IO, a, indent=0)
