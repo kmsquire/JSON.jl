@@ -162,7 +162,7 @@ function print{T, N}(state::State, a::AbstractArray{T, N})
     end_object(state, false)
 end
 
-function print(io::IO, a, indent)
+function print(io::IO, a, indent=0)
     print(State(io, indent), a)
     if indent > 0
         Base.print(io, "\n")
