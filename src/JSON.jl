@@ -15,12 +15,12 @@ type State
     dsep::String
     otype::Array{Bool, 1}
     State(io::IO, indentstep::Int) = new(io, 
-                                            indentstep, 
-                                            0, 
-                                            "", 
-                                            indentstep > 0 ? "\n" : "", 
-                                            indentstep > 0 ? ": " : ":",
-                                            Bool[])
+                                         indentstep, 
+                                         0, 
+                                         "", 
+                                         indentstep > 0 ? "\n" : "", 
+                                         indentstep > 0 ? ": " : ":",
+                                         Bool[])
 end
 
 function set_state(state::State, operate::Int)
@@ -66,13 +66,13 @@ function print_escaped(io::IO, s::String)
     end
 end
 
-function print(state::State, s::String)
+function _print(state::State, s::String)
     Base.print(state.io, '"')
     JSON.print_escaped(state.io, s)
     Base.print(state.io, '"')
 end
 
-function print(state::State, s::Union(Integer, FloatingPoint))
+function _print(state::State, s::Union(Integer, FloatingPoint))
     if isnan(s) || isinf(s)
         Base.print(state.io, "null")
     else
@@ -80,34 +80,34 @@ function print(state::State, s::Union(Integer, FloatingPoint))
     end
 end
 
-function print(state::State, n::Nothing)
+function _print(state::State, n::Nothing)
     Base.print(state.io, "null")
 end
 
-function print(state::State, a::Associative)
+function _print(state::State, a::Associative)
     start_object(state, true)
     first = true
     for (key, value) in a
         first ? (first = false) : Base.print(state.io, ",", state.sufix)
         Base.print(state.io, state.prefix)
-        JSON.print(state, string(key))
+        JSON._print(state, string(key))
         Base.print(state.io, state.dsep)
-        JSON.print(state, value)
+        JSON._print(state, value)
     end
     end_object(state, true)
 end
 
-function print(state::State, a::Union(AbstractVector,Tuple))
+function _print(state::State, a::Union(AbstractVector,Tuple))
     start_object(state, false)
     if length(a) > 0
         Base.print(state.io, state.prefix)
         for x in a[1:end-1]
-            JSON.print(state, x)
+            JSON._print(state, x)
             Base.print(state.io, ",", state.sufix, state.prefix)
         end
 
         try
-            JSON.print(state, a[end])
+            JSON._print(state, a[end])
         catch
             # Potentially we got here by accessing
             # something through a 0 dimensional
@@ -118,59 +118,59 @@ function print(state::State, a::Union(AbstractVector,Tuple))
     end_object(state, false)
 end
 
-function print(state::State, a)
+function _print(state::State, a)
     start_object(state, true)
     range = typeof(a).names
     if length(range) > 0
         Base.print(state.io, state.prefix, "\"", range[1], "\"", state.dsep)
-        JSON.print(state, a.(range[1]))
+        JSON._print(state, a.(range[1]))
 
         for name in range[2:end]
             Base.print(state.io, ",", state.sufix)
             Base.print(state.io, state.prefix, "\"", name, "\"", state.dsep)
-            JSON.print(state, a.(name))
+            JSON._print(state, a.(name))
         end
     end
     end_object(state, true)
 end
 
-function print(state::State, f::Function)
+function _print(state::State, f::Function)
     Base.print(state.io, "\"function at ", f.fptr, "\"")
 end
 
-function print(state::State, d::DataType)
+function _print(state::State, d::DataType)
     Base.print(state.io, d)
 end
 
 # Note: Arrays are printed in COLUMN MAJOR format.
 # i.e. json([1 2 3; 4 5 6]) == "[[1,4],[2,5],[3,6]]"
-function print{T, N}(state::State, a::AbstractArray{T, N})
+function _print{T, N}(state::State, a::AbstractArray{T, N})
     start_object(state, false)
     lengthN = size(a, N)
     if lengthN >= 0
         newdims = ntuple(N - 1, i -> 1:size(a, i))
         Base.print(state.io, state.prefix)
-        JSON.print(state, slice(a, newdims..., 1))
+        JSON._print(state, slice(a, newdims..., 1))
 
         for j in 2:lengthN
             Base.print(state.io, ",", state.sufix, state.prefix)
 
             newdims = ntuple(N - 1, i -> 1:size(a, i))
-            JSON.print(state, slice(a, newdims..., j))
+            JSON._print(state, slice(a, newdims..., j))
         end
     end
     end_object(state, false)
 end
 
 function print(io::IO, a, indent=0)
-    print(State(io, indent), a)
+    JSON._print(State(io, indent), a)
     if indent > 0
         Base.print(io, "\n")
     end
 end
 
 function print(a, indent=0)
-    JSON.print(State(STDOUT, indent), a)
+    JSON._print(State(STDOUT, indent), a)
     if indent > 0
         println()
     end
