@@ -38,7 +38,7 @@ function start_object(state::State, is_dict::Bool)
         Base.print(state.io, is_dict ? "{": "[", state.sufix)
         set_state(state, 1)
     else
-        Base.print(state.io, is_dict ? "{": "[", state.sufix)
+        Base.print(state.io, is_dict ? "{": "[")
     end
 end
 
@@ -46,8 +46,10 @@ function end_object(state::State, is_dict::Bool)
     if state.indentstep > 0
         set_state(state, -1)
         pop!(state.otype)
+        Base.print(state.io, state.sufix, state.prefix, is_dict ? "}": "]")
+    else
+        Base.print(state.io, is_dict ? "}": "]")
     end
-    Base.print(state.io, state.sufix, state.prefix, is_dict ? "}": "]")
 end
 
 function print_escaped(io::IO, s::String)
@@ -98,8 +100,8 @@ function _print(state::State, a::Associative)
 end
 
 function _print(state::State, a::Union(AbstractVector,Tuple))
-    start_object(state, false)
     if length(a) > 0
+        start_object(state, false)
         Base.print(state.io, state.prefix)
         for x in a[1:end-1]
             JSON._print(state, x)
@@ -114,8 +116,10 @@ function _print(state::State, a::Union(AbstractVector,Tuple))
             # part of an array. Probably expected
             # behavior is to not print and move on
         end
+        end_object(state, false)
+    else
+        Base.print(state.io, "[]")
     end
-    end_object(state, false)
 end
 
 function _print(state::State, a)
