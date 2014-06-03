@@ -52,19 +52,18 @@ function end_object(state::State, is_dict::Bool)
     end
 end
 
-function print_escaped(io::IO, s::String)
-    i = start(s)
-    while !done(s,i)
-        c, j = next(s,i)
-        c == '\\'       ? Base.print(io, "\\\\") :
-        c == '"'        ? Base.print(io, "\\\"") :
-        8 <= c <= 10    ? Base.print(io, '\\', "btn"[c-7]) :
-        c == '\f'       ? Base.print(io, "\\f") :
-        c == '\r'       ? Base.print(io, "\\r") :
-        isprint(c)      ? Base.print(io, c) :
-        c <= '\x7f'     ? Base.print(io, "\\u", hex(c, 4)) :
-                          Base.print(io, c) #JSON is UTF8 encoded
-        i = j
+const unescaped = Bool[isprint(c) && !(c in ['\\','"']) for c in '\x00':'\x7F']
+
+function print_escaped(io, s::String)
+    for c in s
+        c <= '\x7f' ? (unescaped[c+1]  ? Base.print(io, c) :
+                       c == '\\'       ? Base.print(io, "\\\\") :
+                       c == '"'        ? Base.print(io, "\\\"") :
+                       8 <= c <= 10    ? Base.print(io, '\\', "btn"[c-7]) :
+                       c == '\f'       ? Base.print(io, "\\f") :
+                       c == '\r'       ? Base.print(io, "\\r") :
+                                         Base.print(io, "\\u", hex(c, 4))) :
+                      Base.print(io, c) #JSON is UTF8 encoded
     end
 end
 
@@ -103,20 +102,18 @@ function _print(state::State, a::Union(AbstractVector,Tuple))
     if length(a) > 0
         start_object(state, false)
         Base.print(state.io, state.prefix)
-        for x in a[1:end-1]
+        i = start(a)
+        if !done(a,i)
+            (x, i) = next(a, i)
             JSON._print(state, x)
+        end
+        while !done(a,i)
+            (x, i) = next(a, i)
             state.doindent ? Base.print(state.io, ",", state.sufix, state.prefix) : 
                              Base.print(state.io, ",")
+            JSON._print(state, x)
         end
 
-        try
-            JSON._print(state, a[end])
-        catch
-            # Potentially we got here by accessing
-            # something through a 0 dimensional
-            # part of an array. Probably expected
-            # behavior is to not print and move on
-        end
         end_object(state, false)
     else
         Base.print(state.io, "[]")
