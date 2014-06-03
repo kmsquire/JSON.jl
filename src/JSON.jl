@@ -10,50 +10,55 @@ const INDENT=true
 const NOINDENT=false
 
 type State{I}
-    io::IO
     indentstep::Int
     indentlen::Int
     prefix::String
-    suffix::String
     otype::Array{Bool, 1}
 
-    State(io::IO, indentstep::Int) = new(io,
-                                         indentstep, 
-                                         0, 
-                                         "", 
-                                         I ? "\n" : "",
-                                         Bool[])
+    State(indentstep::Int) = new(indentstep,
+                                 0,
+                                 "",
+                                 Bool[])
 end
 
-State(io::IO, indentstep::Int=0) = State{indentstep>0}(io, indentstep)
+State(indentstep::Int=0) = State{indentstep>0}(indentstep)
+
+suffix(::State{INDENT}) = "\n"
+suffix(::State{NOINDENT}) = ""
+
+prefix(s::State{INDENT}) = s.prefix
+prefix(::State{NOINDENT}) = ""
+
+space(::State{INDENT}) = " "
+space(::State{NOINDENT}) = ""
 
 function set_state(state::State{INDENT}, operate::Int)
     state.indentlen += state.indentstep * operate
     state.prefix = " "^state.indentlen
 end
 
-function start_object(state::State{INDENT}, is_dict::Bool)
+function start_object(io::IO, state::State{INDENT}, is_dict::Bool)
     was_dict = length(state.otype) == 0 ? false : last(state.otype)
     if was_dict
-        Base.print(state.io, state.suffix, state.prefix)
+        Base.print(io, suffix(state), prefix(state))
     end
     push!(state.otype, is_dict)
-    Base.print(state.io, is_dict ? "{": "[", state.suffix)
+    Base.print(io, is_dict ? "{": "[", suffix(state))
     set_state(state, 1)
 end
 
-function start_object(state::State{NOINDENT}, is_dict::Bool)
-    Base.print(state.io, is_dict ? "{": "[")
-end
-
-function end_object(state::State{INDENT}, is_dict::Bool)
+function end_object(io::IO, state::State{INDENT}, is_dict::Bool)
     set_state(state, -1)
     pop!(state.otype)
-    Base.print(state.io, state.suffix, state.prefix, is_dict ? "}": "]")
+    Base.print(io, suffix(state), prefix(state), is_dict ? "}": "]")
 end
 
-function end_object(state::State{NOINDENT}, is_dict::Bool)
-    Base.print(state.io, is_dict ? "}": "]")
+function start_object(io::IO, state::State{NOINDENT}, is_dict::Bool)
+    Base.print(io, is_dict ? "{": "[")
+end
+
+function end_object(io::IO, state::State{NOINDENT}, is_dict::Bool)
+    Base.print(io, is_dict ? "}": "]")
 end
 
 const unescaped = Bool[isprint(c) && !(c in ['\\','"']) for c in '\x00':'\x7F']
@@ -71,115 +76,112 @@ function print_escaped(io, s::String)
     end
 end
 
-function print(state::State, s::String)
-    Base.print(state.io, '"')
-    JSON.print_escaped(state.io, s)
-    Base.print(state.io, '"')
+function print(io::IO, state::State, s::String)
+    Base.print(io, '"')
+    JSON.print_escaped(io, s)
+    Base.print(io, '"')
 end
 
-function print(state::State, s::Union(Integer, FloatingPoint))
+function print(io::IO, state::State, s::Union(Integer, FloatingPoint))
     if isnan(s) || isinf(s)
-        Base.print(state.io, "null")
+        Base.print(io, "null")
     else
-        Base.print(state.io, s)
+        Base.print(io, s)
     end
 end
 
-function print(state::State, n::Nothing)
-    Base.print(state.io, "null")
+function print(io::IO, state::State, n::Nothing)
+    Base.print(io, "null")
 end
 
-function print{I}(state::State{I}, a::Associative)
-    start_object(state, true)
+function print(io::IO, state::State, a::Associative)
+    start_object(io, state, true)
     first = true
     for (key, value) in a
-        first ? (first = false) : Base.print(state.io, ",", state.suffix)
-        Base.print(state.io, state.prefix)
-        JSON.print(state, string(key))
-        Base.print(state.io, I ? ": " : ":")
-        JSON.print(state, value)
+        first ? (first = false) : Base.print(io, ",", suffix(state))
+        Base.print(io, prefix(state))
+        JSON.print(io, state, string(key))
+        Base.print(io, ":", space(state))
+        JSON.print(io, state, value)
     end
-    end_object(state, true)
+    end_object(io, state, true)
 end
 
-function print{I}(state::State{I}, a::Union(AbstractVector,Tuple))
+function print(io::IO, state::State, a::Union(AbstractVector,Tuple))
     if length(a) > 0
-        start_object(state, false)
-        Base.print(state.io, state.prefix)
+        start_object(io, state, false)
+        Base.print(io, prefix(state))
         i = start(a)
         if !done(a,i)
             (x, i) = next(a, i)
-            JSON._print(state, x)
+            JSON.print(io, state, x)
         end
         while !done(a,i)
             (x, i) = next(a, i)
-            state.doindent ? Base.print(state.io, ",", state.sufix, state.prefix) : 
-                             Base.print(state.io, ",")
-            JSON._print(state, x)
+            Base.print(io, ",", suffix(state), prefix(state))
+            JSON.print(io, state, x)
         end
 
-        end_object(state, false)
+        end_object(io, state, false)
     else
-        Base.print(state.io, "[]")
+        Base.print(io, "[]")
     end
 end
 
-function print{I}(state::State{I}, a)
-    start_object(state, true)
+function print(io::IO, state::State, a)
+    start_object(io, state, true)
     range = typeof(a).names
     if length(range) > 0
-        Base.print(state.io, state.prefix, "\"", range[1], I ? "\": " : "\":")
-        JSON.print(state, a.(range[1]))
+        Base.print(io, prefix(state), "\"", range[1], "\":", space(state))
+        JSON.print(io, state, a.(range[1]))
 
         for name in range[2:end]
-            I ? Base.print(state.io, ",", state.suffix, state.prefix, "\"", name, "\": ") :
-                Base.print(state.io, ",\"", name, "\":")
-            JSON.print(state, a.(name))
+            Base.print(io, ",", suffix(state), prefix(state), "\"", name, "\":", space(state))
+            JSON.print(io, state, a.(name))
         end
     end
-    end_object(state, true)
+    end_object(io, state, true)
 end
 
-function print(state::State, f::Function)
-    Base.print(state.io, "\"function at ", f.fptr, "\"")
+function print(io::IO, state::State, f::Function)
+    Base.print(io, "\"function at ", f.fptr, "\"")
 end
 
-function print(state::State, d::DataType)
-    Base.print(state.io, d)
+function print(io::IO, state::State, d::DataType)
+    Base.print(io, d)
 end
 
 # Note: Arrays are printed in COLUMN MAJOR format.
 # i.e. json([1 2 3; 4 5 6]) == "[[1,4],[2,5],[3,6]]"
-function print{I,T,N}(state::State{I}, a::AbstractArray{T,N})
+function print{T,N}(io::IO, state::State, a::AbstractArray{T,N})
     lengthN = size(a, N)
     if lengthN >= 0
-        start_object(state, false)
+        start_object(io, state, false)
         newdims = ntuple(N - 1, i -> 1:size(a, i))
-        Base.print(state.io, state.prefix)
-        JSON.print(state, slice(a, newdims..., 1))
+        Base.print(io, prefix(state))
+        JSON.print(io, state, slice(a, newdims..., 1))
 
         for j in 2:lengthN
-            I ? Base.print(state.io, ",", state.suffix, state.prefix) :
-                Base.print(state.io, ",")
+            Base.print(io, ",", suffix(state), prefix(state))
 
             newdims = ntuple(N - 1, i -> 1:size(a, i))
-            JSON.print(state, slice(a, newdims..., j))
+            JSON.print(io, state, slice(a, newdims..., j))
         end
-        end_object(state, false)
+        end_object(io, state, false)
     else
-        Base.print(state.io, "[]")
+        Base.print(io, "[]")
     end
 end
 
 function print(io::IO, a, indent=0)
-    JSON.print(State(io, indent), a)
+    JSON.print(io, State(indent), a)
     if indent > 0
         Base.print(io, "\n")
     end
 end
 
 function print(a, indent=0)
-    JSON.print(State(STDOUT, indent), a)
+    JSON.print(STDOUT, State(indent), a)
     if indent > 0
         println()
     end
